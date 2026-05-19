@@ -1,0 +1,12 @@
+node_modules/
+dist/
+artifacts/
+cache/
+coverage/
+.env
+.env.local
+*.ptau
+circuits/build/
+circuits/node_modules/
+.DS_Store
+*.log
