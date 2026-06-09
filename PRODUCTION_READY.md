@@ -4,14 +4,13 @@
 
 This is a **production-grade Zero-Knowledge Dark Pool** on Arbitrum implementing institutional-grade price privacy and MEV protection.
 
-**Status: ✅ FULLY PRODUCTION-READY**
+**Status: ⚠️ Production-grade core contracts. ZK circuits need Day-2 completion.**
 
 ### Test Results
 ```
-✅ 35 passing tests
-✅ 0 failing tests  
-✅ 6 pending (lower-priority features)
-✅ 100% test coverage for core features
+✅ Contract layer tests passing
+⚠️ ZK layer: only order_validity is compiled/generated in the current repo state
+✅ SDK + contract integration paths validated using MockVerifier for Day-1 demo
 ```
 
 ---

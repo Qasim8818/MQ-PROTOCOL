@@ -15,6 +15,18 @@ fi
 
 echo "✅ Using circom: $(circom --version)"
 
+# Enforce circom 2.1.6 (avoid circuit/compiler mismatches)
+CIRCOM_VERSION="$(circom --version | tr -d '\r\n' || true)"
+if [[ "$CIRCOM_VERSION" != *"2.1.6"* ]]; then
+    echo "❌ Circom version mismatch."
+    echo "   Found: $CIRCOM_VERSION"
+    echo "   Expected: circom compiler 2.1.6"
+    echo "Install/upgrade via:"
+    echo "  curl -Ls https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o /usr/local/bin/circom"
+    echo "  chmod +x /usr/local/bin/circom"
+    exit 1
+fi
+
 # Verify snarkjs is installed
 if ! command -v snarkjs &> /dev/null; then
     echo "❌ snarkjs not found"
@@ -28,24 +40,37 @@ mkdir -p ../contracts/verifiers
 
 PTAU_FILE="build/powersOfTau28_hez_final_15.ptau"
 
-# Check ptau file - warn if stub
+# Check ptau file - hard fail if suspicious (avoid silent stub)
+# Real ptau is ~55MB. We'll require at least 30MB.
+MIN_PTAU_BYTES=$((30 * 1024 * 1024))
+
 if [ -f "$PTAU_FILE" ]; then
     SIZE=$(wc -c < "$PTAU_FILE")
-    if [ $SIZE -lt 1000000 ]; then
-        echo "⚠️  Powers of Tau file is only $SIZE bytes (stub detected)"
-        echo "Downloading real ptau file (~55MB)..."
-        rm "$PTAU_FILE"
+    if [ "$SIZE" -lt "$MIN_PTAU_BYTES" ]; then
+        echo "❌ Powers of Tau file is suspiciously small: $SIZE bytes"
+        echo "   Expected real file (~55MB). Refusing to continue."
+        echo "   Removing stub and downloading the real ptau..."
+        rm -f "$PTAU_FILE"
+    else
+        echo "✅ Powers of Tau file size looks valid: $SIZE bytes"
     fi
 fi
 
 # Download powers of Tau file if not present
 if [ ! -f "$PTAU_FILE" ]; then
-    echo "📥 Downloading Powers of Tau file (may take 2-3 minutes)..."
-    curl -L https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_15.ptau -o "$PTAU_FILE"
-    echo "✅ Downloaded: $(ls -lh $PTAU_FILE | awk '{print $5}')"
+    echo "📥 Downloading Powers of Tau file (~55MB)..."
+    curl -L --fail https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_15.ptau -o "$PTAU_FILE"
 fi
 
-echo "✅ Powers of Tau file ready at $PTAU_FILE"
+# Final verification
+SIZE=$(wc -c < "$PTAU_FILE")
+if [ "$SIZE" -lt "$MIN_PTAU_BYTES" ]; then
+    echo "❌ Powers of Tau download failed or produced incomplete file."
+    echo "   File size: $SIZE bytes (min required: $MIN_PTAU_BYTES)"
+    exit 1
+fi
+
+echo "✅ Powers of Tau file ready at $PTAU_FILE (size: $SIZE bytes)"
 
 # Compile each circuit
 CIRCUITS=("order_validity" "match_proof" "cancel_proof")
@@ -84,7 +109,7 @@ for CIRCUIT in "${CIRCUITS[@]}"; do
         "build/${CIRCUIT}.r1cs" \
         "$PTAU_FILE" \
         "build/${CIRCUIT}_0000.zkey" \
-        -v 2>&1 | tail -5
+        -v
 
     echo "[3/5] Contributing to setup (Phase 2)..."
     snarkjs zkey contribute \
@@ -92,25 +117,51 @@ for CIRCUIT in "${CIRCUITS[@]}"; do
         "build/${CIRCUIT}_final.zkey" \
         --name="1st Contributor" \
         -v \
-        -e="$CIRCUIT" 2>&1 | tail -3
+        -e="$CIRCUIT"
 
     echo "[4/5] Exporting Solidity verifier contract..."
     VERIFIER_PATH="../contracts/verifiers/${VERIFIER_NAME}.sol"
+    rm -f "$VERIFIER_PATH"
     snarkjs zkey export solidityverifier \
         "build/${CIRCUIT}_final.zkey" \
         "$VERIFIER_PATH"
 
-    # Fix Solidity contract names
+    if [ ! -s "$VERIFIER_PATH" ]; then
+        echo "❌ Failed to generate ${VERIFIER_PATH}"
+        exit 1
+    fi
+
+    # Fix Solidity contract names (fail fast if patterns not found)
+    if ! grep -q "library Pairing" "$VERIFIER_PATH"; then
+        echo "❌ Expected Pairing library pattern not found in ${VERIFIER_PATH}"
+        exit 1
+    fi
     sed -i "s/library Pairing/library ${PAIRING_NAME}/" "$VERIFIER_PATH"
+
+    if ! grep -q "using Pairing for" "$VERIFIER_PATH"; then
+        echo "❌ Expected 'using Pairing for' pattern not found in ${VERIFIER_PATH}"
+        exit 1
+    fi
     sed -i "s/using Pairing for \\*/using ${PAIRING_NAME} for */" "$VERIFIER_PATH"
+
     sed -i "s/Pairing\\./${PAIRING_NAME}./g" "$VERIFIER_PATH"
+
+    if ! grep -q "contract Groth16Verifier" "$VERIFIER_PATH"; then
+        echo "❌ Expected Groth16Verifier contract pattern not found in ${VERIFIER_PATH}"
+        exit 1
+    fi
     sed -i "s/contract Groth16Verifier/contract ${VERIFIER_NAME}/" "$VERIFIER_PATH"
 
     echo "[5/5] Exporting verification key..."
     snarkjs zkey export verificationkey \
         "build/${CIRCUIT}_final.zkey" \
         "build/${CIRCUIT}_vk.json"
-    
+
+    if [ ! -s "build/${CIRCUIT}_vk.json" ]; then
+        echo "❌ Failed to export verification key for $CIRCUIT"
+        exit 1
+    fi
+
     echo "✅ $CIRCUIT compiled successfully!"
 done
 

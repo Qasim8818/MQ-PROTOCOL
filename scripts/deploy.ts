@@ -112,19 +112,19 @@ async function main() {
   console.log("\n4. Deploying DarkPoolCore...");
   
   const DarkPoolCore = await ethers.getContractFactory("DarkPoolCore");
-  const darkPoolCore: any = await (DarkPoolCore as any).deploy({
-    orderVerifier: await orderVerifier.getAddress(),
-    matchVerifier: await matchVerifier.getAddress(),
-    cancelVerifier: await cancelVerifier.getAddress(),
-    depositTransitionVerifier: await orderVerifier.getAddress(), // Use same mock for demo
-    feeRecipient: deployer.address,
-    guardian: await guardian.getAddress(),
-    protocolFeeBps: 100n, // 1%
-    orderTTLBlocks: 1000n,
-    minQuantity: ethers.parseEther("1"),
-    emptyTreeRoot: ethers.ZeroHash,
-    maxNotesPerBlock: 1000n,
-  });
+    const darkPoolCore: any = await (DarkPoolCore as any).deploy({
+      orderVerifier: await orderVerifier.getAddress(),
+      matchVerifier: await matchVerifier.getAddress(),
+      cancelVerifier: await cancelVerifier.getAddress(),
+      depositTransitionVerifier: await depositTransitionVerifier.getAddress(),
+      feeRecipient: deployer.address,
+      guardian: await guardian.getAddress(),
+      protocolFeeBps: 100n, // 1%
+      orderTTLBlocks: 1000n,
+      minQuantity: ethers.parseEther("1"),
+      emptyTreeRoot: ethers.ZeroHash,
+      maxNotesPerBlock: 1000n,
+    });
   
   await darkPoolCore.waitForDeployment();
   const darkPoolAddr = await darkPoolCore.getAddress();
